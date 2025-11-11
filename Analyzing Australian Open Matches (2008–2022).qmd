@@ -1,0 +1,348 @@
+---
+title: "Analyzing Australian Open Matches (2008–2022)"
+author: "Katelyn McDonald"
+format:
+  html:
+    toc: true
+    embed-resources: true
+editor: visual
+---
+
+```{r read in data}
+#| message: false
+#| warning: false
+#| echo: false
+
+au_open = read.csv("AustralianOpen0822.csv")
+
+```
+
+```{r AT 1}
+#| message: false
+#| warning: false
+#| echo: false
+
+library(dplyr)
+library(tibble)
+au_open = rowid_to_column(au_open)
+au_open = au_open %>% rename(matchID = rowid)
+tennis = au_open
+
+```
+
+```{r AT 2}
+#| message: false
+#| warning: false
+#| echo: false
+library(tidyr)
+
+tennis_long = tennis %>% pivot_longer(cols = c(Winner, Loser), names_to = "Outcome", values_to = "Player")
+tennis_long = tennis_long  %>% select(matchID, Year, Player, Outcome)
+```
+
+```{r AT 3}
+#| message: false
+#| warning: false
+#| echo: false
+
+matches = n_distinct(tennis$matchID)
+
+players_matches = n_distinct(tennis_long$Player)
+
+rank_matches = tennis %>%
+  group_by(rank_diff_cat) %>%
+  summarise(count = n()) %>%
+  mutate(percentage = (count / sum(count)) * 100) %>%
+  arrange(desc(percentage))
+
+
+```
+
+```{r AT 4}
+#| message: false
+#| warning: false
+#| echo: false
+
+summary = tennis_long %>%
+  group_by(Player) %>%
+  summarise(
+    total_matches = n(), 
+    total_wins = sum(Outcome == "Winner"),  
+    win_percentage = (total_wins / total_matches) * 100,  
+    total_years = n_distinct(Year),  
+    avg_matches_per_year = total_matches / total_years  # Avg matches per year
+  ) %>%
+  arrange(desc(total_matches))  
+
+```
+
+```{r AT 5}
+#| message: false
+#| warning: false
+#| echo: false
+
+largest_rank_diff_match = tennis %>%
+  filter(abs(rank_diff) == max(abs(rank_diff), na.rm = TRUE))
+         
+tennis = tennis %>%
+  mutate(upset = ifelse(rank_diff > 0, 1, 0))
+
+# Calculate the proportion of upsets by rank difference category
+proportions = tennis %>%
+  group_by(rank_diff_cat) %>%
+  summarise(
+    total_matches = n(),
+    upset_matches = sum(upset, na.rm = TRUE),
+    upset_proportion = upset_matches / total_matches
+  )
+
+
+# yes = oppennet hits with same hand (LL or RR)
+proportions2 = tennis %>%
+  group_by(same_handedness) %>%
+  summarise(
+    total_matches = n(),
+    upset_matches = sum(upset, na.rm = TRUE),
+    upset_proportion = upset_matches / total_matches
+  )
+
+# if players used different hands  26% of the time it resulted in an upset
+# if players used the same hand (RR or LL) 25% of the time it resulted in an upset
+# there were 29 instances where we don't know if the players used the same hand or not
+```
+
+```{r AT 6}
+#| message: false
+#| warning: false
+#| echo: false
+
+library(tidyverse)
+library(dplyr)
+library(plotly)
+library(DT)
+###################################################
+
+top5 = summary %>% slice_max(total_matches, n = 5)
+plot1 = ggplot(top5, aes(x=Player, y=total_matches)) +
+  geom_bar(stat="identity", fill = "steelblue") +
+  labs(y = "Win Percentage (%)") +
+  theme_bw()
+
+###################################################
+
+plot2 = plot_ly(tennis, x = ~rank_diff, type = "histogram") %>%
+  layout(title = "Distribution of Rank Differences in Matches",
+         xaxis = list(title = "Rank Difference"),
+         yaxis = list(title = "Match Count"),
+         bargap = 0.1)
+  
+
+
+###################################################
+
+proportions2_clean = proportions2 %>%
+  filter(!is.na(same_handedness))
+
+plot3 = ggplot(proportions2_clean, aes(x = "", y = upset_proportion, fill = same_handedness)) +
+  geom_bar(stat = "identity", width = 1, show.legend = TRUE) +
+  coord_polar(theta = "y") +
+  labs(
+    title = "Proportion of Upset Matches by Handedness",
+    fill = "Same Handedness"
+  ) +
+  theme_void()
+
+###################################################
+
+win_counts = tennis %>%
+  group_by(Year, Winner) %>%
+  summarise(Wins = n(), .groups = 'drop')
+
+total_matches_winner = tennis %>%
+  group_by(Year, Winner) %>%
+  summarise(Matches = n(), .groups = 'drop')
+
+total_matches_loser = tennis %>%
+  group_by(Year, Loser) %>%
+  summarise(Matches = n(), .groups = 'drop') %>%
+  rename(Winner = Loser)
+
+total_matches = bind_rows(total_matches_winner, total_matches_loser) %>%
+  group_by(Year, Winner) %>%
+  summarise(Matches = sum(Matches), .groups = 'drop')
+
+win_percentage = win_counts %>%
+  inner_join(total_matches, by = c("Year", "Winner")) %>%
+  mutate(Win_Percentage = (Wins / Matches) * 100)
+
+top_players = c("Djokovic N.", "Federer R.", "Nadal R.", "Murray A.")
+
+win_percentage_filtered <- win_percentage %>%
+  filter(Winner %in% top_players)
+
+plot4 <- plot_ly(win_percentage_filtered, 
+               x = ~Year, 
+               y = ~Win_Percentage, 
+               color = ~Winner, 
+               type = 'scatter', 
+               mode = 'lines+markers',
+               yaxis = list(title = "Win Percentage")) 
+```
+
+# 1 Introduction
+
+Tennis is one of the most widely followed sport, and Grand Slam tournaments are a key highlight of tennis season. This paper will focus on the men’s Australian Open match outcomes from 2008 to 2022. There were 1905 matches with 19 variables for both the winner and loser of each match, along with information such as what hand they play with and their Association of Tennis Professionals (ATP) rank and characteristics of the players. The objective of this paper is to examine various factors such as rank differences, player handedness, and match outcomes to identify patterns in match results and understand how factors like ranking and handedness influence the likelihood of winning. The data used for analysis has been provided by SCORE Network and more about the data set can be viewed at this [link](https://data.scorenetwork.org/tennis/australian-open.html){.uri}.
+
+# 2 Data Overview
+
+The data set consists of match outcomes from the men’s Australian Open between 2008 and 2022. Each row represents a single match and contains information about the winner, loser, their rankings, handedness, and other characteristics. The data includes variables such as the year of the match, the names of the winning and losing players, their respective rankings, the handedness they play with, and the absolute difference in their rankings. A categorical variable, rank_diff_cat, classifies ranking differences into three levels: low, medium, and high, and another variable, same_handedness, indicates whether both players use the same hand.
+
+Table 1 is the data set used.
+
+```{r}
+#| message: false
+#| warning: false
+#| echo: false
+
+datatable(tennis)
+
+
+```
+
+###### **Table 1**
+
+We have created a second data set that restructured the original data to better analyze individual player performance across matches. For the analysis purposes of this paper, a new match identification column was introduced to uniquely identify each match. The data set was then transformed into a long format, where each match was represented by two rows, one for the winner and one for the loser.
+
+Table 2 is the second restructured data set.
+
+```{r}
+#| message: false
+#| warning: false
+#| echo: false
+
+datatable(tennis_long)
+
+```
+
+###### **Table 2**
+
+The data set contains a total of `r matches` unique matches which represents all recorded men’s Australian Open matches from 2008 to 2022. Across these matches, `r players_matches` distinct players have played, highlighting the range and diversity of the players over the years. The differences in player rankings are categorized into three groups: Low (30 or less), Medium (31-75), and High (more than 75).
+
+Table 3 shows the percentage of each rank difference category.
+
+```{r}
+#| message: false
+#| warning: false
+#| echo: false
+
+datatable(rank_matches)
+
+```
+
+###### **Table 3**
+
+Majority of matches fall within the Medium rank difference category, accounting for 35.3% of all recorded matches. This suggests that a significant portion of Australian Open matches occur between players with moderate ranking disparities. The Low rank difference category follows closely at 34.6%, indicating that nearly as many matches involve players with relatively small ranking gaps. In contrast, 29.8% of matches fall into the High rank difference category, meaning that a smaller portion of matches involve players with significant ranking gaps, which could lead to more predictable outcomes or potential upsets. Additionally, there are six instances where the rank difference is unknown, accounting for only 0.315% of the data.
+
+Table 4 provides insights into the performance and consistency of top players in the Australian Open from 2008 to 2022. For instance, Novak Djokovic leads in total matches played (84) and has an impressive win percentage of 94%, indicating his superiority in the tournament over the years. Rafael Nadal and Roger Federer follow closely, each with 79 and 77 matches played, respectively. Nadal has won 84.8% of his matches, while Federer has a slightly higher win rate of 87.0%, suggesting both players maintained a strong presence in the tournament.
+
+```{r}
+#| message: false
+#| warning: false
+#| echo: false
+
+datatable(summary)
+
+```
+
+###### **Table 4**
+
+We can further analyze the win percentage of these players in Figure 1.
+
+```{r}
+#| message: false
+#| warning: false
+#| echo: false
+plot1
+```
+
+##### **Figure 1: Win Percentage of Top Tennis Players**
+
+Figure 1 displays the win percentage of six professional tennis players: Berdych, Djokovic, Federer, Murray, Nadal, and Wawrinka. Each bar's height corresponds to the respective player's win percentage. From the graph, Djokovic and Nadal have the highest win percentages, followed closely by Federer. Berdych, Murray, and Wawrinka have relatively lower win percentages.
+
+```{r}
+#| message: false
+#| warning: false
+#| echo: false
+plot4
+```
+
+##### **Figure 2: Win Percentage by Player Over Time Line Chart**
+
+Figure 2 further explores the players with the top win percentage, we can see that most of these players maintain high win percentages above 80-90% for many years. Some of the sudden dips could indicated injuries or other outside factors.
+
+# 3 Results
+
+We can further analyze the data at the player level with Table 5. The match in 2009 where Andrei Pavel lost to Andy Murray had the largest difference in ranks. An upset match happens when a lower-ranked player defeats the higher-ranked player, who was expected to win. We can see an overall view of how often Upset matches occur for low, medium, and high differences in rank in Table 5.
+
+```{r}
+#| message: false
+#| warning: false
+#| echo: false
+datatable(proportions2)
+
+```
+
+###### **Table 5**
+
+We can also see players playing with the same hand affects the proportions of upsets in Table 6.
+
+```{r}
+#| message: false
+#| warning: false
+#| echo: false
+datatable(proportions)
+```
+
+###### **Table 6**
+
+The data shows that when players had different handedness, 427 matches were recorded, and 113 of them resulted in an upset, leading to an upset proportion of 26.5%. In contrast, when players had the same handedness, there were 1,449 matches, with 373 upsets, resulting in an upset proportion of 25.7%. This indicates a slightly lower likelihood of an upset when players share the same handedness, though the difference is minimal at only 0.8 percentage points. The small difference in upset proportions between same-handed and different-handed players suggests that handedness does not strongly influence the likelihood of an upset. Additionally, there were 29 matches where the handedness information was missing, and none of these matches resulted in an upset, giving an upset proportion of 0%
+
+```{r}
+#| message: false
+#| warning: false
+#| echo: false
+plot2
+```
+
+##### **Figure 3: Histogram of Rank Differences**
+
+Figure 3 displays the distribution of rank differences between winners and losers in professional tennis matches. The highest concentration of matches occurs around a rank difference close to 0, meaning that most matches take place between players of similar rankings. As the rank difference increases positively and negatively, the frequency of matches decreases. The distribution is slightly skewed, indicating that while higher-ranked players win more often, lower-ranked players do have opportunities for upsets.
+
+We can also focus on if players playing with the same hand have an effect on the proportion of upset matches. Table 7 shows the proportion of matches resulting in upsets grouped by if the players used the same hand or not. Note there are 29 instances where if the players used the same hand or not is unknown.
+
+```{r}
+#| message: false
+#| warning: false
+#| echo: false
+datatable(proportions2)
+
+```
+
+###### **Table 7**
+
+Figure 4 shows the proportion of Upset matches when players did and did not play with the same hand.
+
+```{r}
+#| message: false
+#| warning: false
+#| echo: false
+plot3
+```
+
+##### **Figure 4: Pie Chart of Proportion of Upset Matches by Handedness**
+
+While the proportion of upsets is slightly higher for players with different handedness (26.5%) compared to players with same handedness (25.7%), the difference is small.
+
+# 4 Conclusion
+
+This analysis provided valuable insights into men’s Australian Open match outcomes from 2008 to 2022. The findings confirm that higher-ranked players generally have a greater chance of winning, but the likelihood of an upset increases when the rank difference is smaller. The data also suggests that handedness has little impact on match results, as the difference in upset proportions between players with the same and different handedness is minimal. Additionally, players with more years of participation and higher match counts tend
